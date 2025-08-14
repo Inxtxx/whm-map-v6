@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>WHM 462 集签地图 · v6（单文件构建）</title>
+
+<style>
+/* ===== Leaflet CSS（构建时内联） ===== */
+__LEAFLET_CSS__
+/* ===== 页面样式 ===== */
+html,body,#map{height:100%;margin:0;background:#0b1d3d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+.legend{position:absolute;left:12px;bottom:12px;background:#fff;color:#000;padding:10px 12px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.2);font-size:12px;line-height:1.5;z-index:900}
+.legend .row{display:flex;align-items:center;margin:3px 0}
+.sw{width:16px;height:16px;border-radius:3px;margin-right:8px;border:1px solid #9db3ff99}
+.panel{position:absolute;right:12px;top:12px;max-width:460px;background:#fff;padding:12px;border-radius:8px;box-shadow:0 1px 8px rgba(0,0,0,.25);display:none;z-index:901}
+.panel h3{margin:0 0 6px;font-size:16px}
+.job{border-top:1px solid #eee;padding:8px 0}
+.job a{color:#0b5fff;text-decoration:none}
+.job small{display:block;color:#666}
+.pill{display:inline-block;background:#eef;border-radius:999px;padding:2px 8px;margin:2px 4px 0 0;font-size:12px}
+.note{font-size:12px;color:#444;margin-top:6px}
+.badge{position:absolute;left:12px;top:12px;background:#fff;color:#222;padding:8px 10px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.18);font-size:12px;z-index:902}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="badge" id="badge">状态：初始化（v6·单文件）</div>
+
+<div class="legend">
+  <div style="font-weight:700;margin-bottom:6px;color:#000">可集签岗位（近10天）· 五级蓝色</div>
+  <div class="row"><span class="sw" style="background:#eaf2ff"></span>0</div>
+  <div class="row"><span class="sw" style="background:#cfe1ff"></span>1–5</div>
+  <div class="row"><span class="sw" style="background:#9fc2ff"></span>6–20</div>
+  <div class="row"><span class="sw" style="background:#5b94ff"></span>21–50</div>
+  <div class="row"><span class="sw" style="background:#1e6bff"></span>51+</div>
+  <div style="margin:6px 0;border-top:1px dashed #ccc"></div>
+  <div class="row"><span class="sw" style="background:#e4e6eb;border:1px dashed #ff4d4f"></span><span style="color:#c0392b">不可集签（462）</span></div>
+</div>
+
+<div class="panel" id="jobsPanel">
+  <h3 id="jobsTitle"></h3>
+  <div id="jobsSub" style="margin-bottom:6px;"></div>
+  <div id="jobsList"></div>
+  <div class="note">岗位来源：Workforce Australia（官方）。仅统计近10天，并按 462 行业口径筛选。</div>
+</div>
+
+<!-- ===== Leaflet / pako（构建时内联 JS） ===== -->
+<script>
+__LEAFLET_JS__
+</script>
+<script>
+__PAKO_JS__
+</script>
+
+<script>
+// ====== 462 规则（中文） ======
+const RULES = {
+  tourismExtraPostcodes:["4406","4416","4498","7215"],
+  northern:{ ntAll:true, postcodes:[
+    "0872","6537","6642","6646","6701","6705","6707","6710","6711","6712","6713","6714","6716","6718",
+    "6720","6721","6722","6725","6726","6728","6740","6743","6751","6753","6754","6758","6760","6762","6765","6770",
+    "4472","4478","4481","4482","4680","4694","4695","4697","4699","4700","4701","4702","4703","4704","4705","4706",
+    "4707","4709","4710","4711","4712","4713","4714","4717",
+    "4720","4721","4722","4723","4724","4725","4726","4727","4728",
+    "4730","4731","4732","4733","4735","4736","4737","4738","4739",
+    "4740","4741","4742","4743","4744","4745","4746",
+    "4750","4751","4753","4754","4756","4757",
+    "4798","4799","4800","4801","4802","4803","4804","4805","4806","4807","4808","4809",
+    "4810","4811","4812","4814","4815","4816","4817","4818","4819",
+    "4820","4821","4822","4823","4824","4825","4828","4829","4830",
+    "4849","4850","4852","4854","4855","4856","4858","4859",
+    "4860","4861","4865","4868","4869",
+    "4870","4871","4872","4873","4874","4875","4876","4877","4878","4879",
+    "4880","4881","4882","4883","4884","4885","4886","4887","4888",
+    "4890","4891","4892","4895"
+  ]},
+  regionalByState:{
+    NSW:["2311-2312","2328-2411","2420-2490","2536-2551","2575-2594","2618-2739","2787-2898"],
+    VIC:["3139","3211-3334","3340-3424","3430-3649","3658-3749","3753","3756","3758","3762","3764","3778-3781","3783","3797","3799","3810-3909","3921-3925","3945-3974","3979","3981-3996"],
+    QLD:["4124-4125","4133","4211","4270-4272","4275","4280","4285","4287","4307-4499","4510","4512","4515-4519","4522-4899"],
+    WA:["6041-6044","6055-6056","6069","6076","6083-6084","6111","6121-6126","6200-6799"],
+    SA:["ALL"],TAS:["ALL"],NT:["ALL"],NORFOLK:["ALL"]
+  },
+  remoteVRByState:{
+    NSW:["2356","2386-2387","2396","2405-2406","2672","2675","2717","2721","2726","2734-2735","2737-2739","2831","2836","2839-2842","2879","2898"],
+    QLD:["4472","4478","4481-4482","4694-4695","4697","4699-4707","4709-4714","4717","4720-4728","4730-4733","4735-4746","4750-4751","4753-4754","4756-4757","4798-4812","4814-4825","4828-4830","4849-4861","4865","4868-4888","4890-4892","4895"],
+    SA:["5220-5223","5302-5304","5440","5576-5577","5582-5583","5602-5607","5611","5630-5633","5640-5642","5650-5654","5658","5660-5661","5670","5680","5690"],
+    WA:["0872","6434","6442-6450","6468","6473-6479","6485-6490","6510","6513-6515","6517","6535-6537","6558-6562","6605-6606","6609-6611","6613","6615-6616","6620-6623","6625-6630","6635-6642","6646-6647","6701","6705","6707","6710-6714","6716","6718","6720-6722","6725-6726","6728","6740","6743","6751","6753-6754","6758","6760","6762","6765","6770"],
+    NT:["ALL"],TAS:[],VIC:[],ACT:[]
+  }
+};
+const BADGE = t=>{ const b=document.getElementById('badge'); if(b) b.innerHTML=t; };
+const STATES = ['NSW','VIC','QLD','SA','WA','TAS','NT'];
+const blue5 = n => n<=0 ? '#eaf2ff' : n<=5 ? '#cfe1ff' : n<=20 ? '#9fc2ff' : n<=50 ? '#5b94ff' : '#1e6bff';
+const STYLE_INELIG = { fillColor:'#e4e6eb', color:'#ff4d4f', weight:1.2, dashArray:'6,4', fillOpacity:.35, opacity:.95 };
+let JOBS = { perPOA:{} };
+
+function inRanges(r,pc){ pc=String(pc||'').padStart(4,'0'); for(const s0 of (r||[])){ const s=String(s0).trim(); if(s==='ALL') return true; if(s.includes('-')){ const[a,b]=s.split('-').map(x=>parseInt(x,10)); const n=parseInt(pc,10); if(n>=a&&n<=b) return true; } else if(pc===s.padStart(4,'0')) return true; } return false; }
+function stateByPc(pc){ pc=String(pc||'').padStart(4,'0'); const p=pc[0]; if(p==='2')return'NSW'; if(p==='3')return'VIC'; if(p==='4')return'QLD'; if(p==='5')return'SA'; if(p==='6')return'WA'; if(p==='7')return'TAS'; if(p==='0'||p==='8'||p==='9')return'NT'; return'Other'; }
+function inRegional(pc){ const st=stateByPc(pc); const segs=(RULES.regionalByState[st]||[]); if(segs.includes('ALL')) return true; return inRanges(segs, pc); }
+function inRemoteVR(pc){ const st=stateByPc(pc); const segs=(RULES.remoteVRByState[st]||[]); if(segs.includes('ALL')) return true; if(inRanges(segs, pc)) return true; return (RULES.tourismExtraPostcodes||[]).includes(String(pc||'').padStart(4,'0')); }
+function inNorthern(pc){ const s=stateByPc(pc); if(s==='NT' && RULES.northern.ntAll) return true; return (RULES.northern.postcodes||[]).includes(String(pc||'').padStart(4,'0')); }
+function industriesZH(pc){ const t=[]; if(inNorthern(pc)||inRemoteVR(pc)) t.push('旅游与酒店业'); if(inNorthern(pc)||inRegional(pc)){ t.push('植物与动物栽培'); t.push('建筑业'); } if(inNorthern(pc)) t.push('渔业与珍珠养殖 / 林业种植与采伐'); return t; }
+
+const getPOAfromAnyProps = props => { const keys=['poa_code_2021','POA_CODE21','postcode','POA_CODE','code','id','name','poa_code','POA_CODE_2021']; for(const k of keys){ const v=props[k]; if(v||v===0){ const m=String(v).match(/\b(\d{4})\b/); if(m) return m[1]; } } for(const v of Object.values(props||{})){ const m=String(v).match(/\b(\d{4})\b/); if(m) return m[1]; } return null; };
+const getPOAName = props => props.poa_name_2021 || props.POA_NAME21 || props.name || ('邮编 '+getPOAfromAnyProps(props));
+const blueStyle = n => ({ fillColor:blue5(n), color:'#183a7a', weight:.6, fillOpacity:.72, opacity:.95 });
+const getCount = pc => (JOBS?.perPOA?.[pc]?.count)||0;
+const getItems = pc => (JOBS?.perPOA?.[pc]?.items)||[];
+
+function applyViewConstraints(map){
+  const AUS=L.latLngBounds(L.latLng(-44.5,110.0), L.latLng(-9.0,155.0));
+  const resize=()=>{ const size=map.getSize(); const padX=Math.round(size.x*0.20), padY=Math.round(size.y*0.20);
+    const minZ=map.getBoundsZoom(AUS,true,{paddingTopLeft:[padX,padY],paddingBottomRight:[padX,padY]}); map.setMinZoom(minZ); if(map.getZoom()<minZ) map.setZoom(minZ); };
+  map.setMaxBounds(AUS.pad(0.18)); map.options.maxBoundsViscosity=0.9; map.fitBounds(AUS,{padding:[50,50]}); resize(); map.on('resize', resize);
+}
+function bindPolygonUI(layer, props){
+  const pc=getPOAfromAnyProps(props); if(!pc) return;
+  const inds=industriesZH(pc);
+  if(!inds.length) layer.setStyle({ fillColor:'#e4e6eb', color:'#ff4d4f', weight:1.2, dashArray:'6,4', fillOpacity:.35, opacity:.95 });
+  else layer.setStyle(blueStyle(getCount(pc)));
+  layer.on('mouseover', e=>{
+    const html = `<div style="font-weight:700;margin-bottom:4px;">${getPOAName(props)}（邮编 ${pc}）</div>`
+      + (inds.length? `可集签行业：${inds.map(i=>`<span class="pill">${i}</span>`).join(' ')}`
+                    : `<span style="color:#c0392b">不可集签（462）</span>`)
+      + `<div style="margin-top:6px;">近10天岗位总数：<b>${getCount(pc)}</b></div>`;
+    layer.bindTooltip(html,{sticky:true,opacity:.97,direction:'top',offset:[0,-6]}).openTooltip(e.latlng);
+    if(inds.length) layer.setStyle({weight:1.2,fillOpacity:.85});
+  });
+  layer.on('mouseout', ()=>{ if(inds.length) layer.setStyle({weight:.6,fillOpacity:.72}); });
+  layer.on('click', ()=>{
+    const panel=document.getElementById('jobsPanel'), title=document.getElementById('jobsTitle'), sub=document.getElementById('jobsSub'), list=document.getElementById('jobsList');
+    const items=getItems(pc), inds=industriesZH(pc);
+    title.textContent = `${getPOAName(props)}（邮编 ${pc}）`;
+    sub.innerHTML = (inds.length? `可集签行业：${inds.map(i=>`<span class="pill">${i}</span>`).join(' ')}` : `<span style="color:#c0392b">不可集签（462）</span>`) + ` · 近10天岗位：<b>${getCount(pc)}</b>`;
+    list.innerHTML='';
+    if(!items.length){
+      const wf=`https://www.workforceaustralia.gov.au/individuals/jobs/search?searchText=${encodeURIComponent(pc)}`;
+      list.innerHTML = `<div class="note">暂无岗位清单（或尚未更新）。<br/>可先查看官方：<a class="btn" href="${wf}" target="_blank" rel="noopener">Workforce Australia（搜索 ${pc}）</a></div>`;
+    }else{
+      items.slice(0,120).forEach(it=>{
+        const d=document.createElement('div'); d.className='job';
+        d.innerHTML=`<a href="${it.url}" target="_blank" rel="noopener">${(it.title||'职位').trim()}</a>
+                     <small>${(it.company||'').trim()} ${it.location? '· '+it.location:''} ${it.age||''}</small>`;
+        list.appendChild(d);
+      });
+    }
+    panel.style.display='block'; layer.bringToFront();
+  });
+}
+
+// ====== 数据占位符（构建时写入：各州 Base64.gz 文本）======
+const DATA = {
+  NSW: "__POA_NSW__",
+  VIC: "__POA_VIC__",
+  QLD: "__POA_QLD__",
+  SA:  "__POA_SA__",
+  WA:  "__POA_WA__",
+  TAS: "__POA_TAS__",
+  NT:  "__POA_NT__"
+};
+
+// ====== 主流程 ======
+(function init(){
+  if(!window.L||!L.map){ BADGE('状态：Leaflet 未就绪'); return; }
+  const map=L.map('map',{preferCanvas:true,zoomControl:true,worldCopyJump:false,scrollWheelZoom:true});
+  applyViewConstraints(map);
+  BADGE('状态：加载州数据 0/7 …');
+  let ok=0,fail=0;
+
+  // 如果你要马上看到颜色深浅，也可在构建后把 data/jobs-last10d.json 放进页面里；此处默认 0
+  (async()=>{
+    for(const st of ['NSW','VIC','QLD','SA','WA','TAS','NT']){
+      try{
+        const b64 = DATA[st]; if(!b64) throw new Error('no data');
+        const bin = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+        const text = pako.ungzip(bin, { to: 'string' });
+        const geo = JSON.parse(text);
+        L.geoJSON(geo,{
+          smoothFactor:1.0,
+          style:f=>{
+            const props=f.properties||{};
+            const pc = (props.POA_CODE21||props.poa_code_2021||props.postcode||props.code||'').toString().padStart(4,'0');
+            const inds = (()=>{ const t=[]; const st=pc[0]==='2'?'NSW':pc[0]==='3'?'VIC':pc[0]==='4'?'QLD':pc[0]==='5'?'SA':pc[0]==='6'?'WA':pc[0]==='7'?'TAS':'NT';
+              const reg=(RULES.regionalByState[st]||[]).some(s=>s==='ALL' || (s.includes('-')? (parseInt(pc,10)>=parseInt(s.split('-')[0],10) && parseInt(pc,10)<=parseInt(s.split('-')[1],10)) : pc===s.padStart(4,'0')));
+              const remote=(RULES.remoteVRByState[st]||[]).some(s=>s==='ALL' || (s.includes('-')? (parseInt(pc,10)>=parseInt(s.split('-')[0],10) && parseInt(pc,10)<=parseInt(s.split('-')[1],10)) : pc===s.padStart(4,'0'))) || (RULES.tourismExtraPostcodes||[]).includes(pc);
+              const northern = (st==='NT' && RULES.northern.ntAll) || (RULES.northern.postcodes||[]).includes(pc);
+              if(northern||remote) t.push('旅游与酒店业');
+              if(northern||reg){ t.push('植物与动物栽培'); t.push('建筑业'); }
+              if(northern) t.push('渔业与珍珠养殖 / 林业种植与采伐');
+              return t; })();
+            if(!inds.length) return { fillColor:'#e4e6eb', color:'#ff4d4f', weight:1.2, dashArray:'6,4', fillOpacity:.35, opacity:.95 };
+            return { fillColor: blue5(0), color:'#183a7a', weight:.6, fillOpacity:.72, opacity:.95 }; // 默认 0，等你后续接入岗位数
+          },
+          onEachFeature:(f,layer)=> bindPolygonUI(layer, f.properties||{})
+        }).addTo(map);
+        ok++; BADGE(`状态：加载州数据 ${ok}/7`);
+      }catch(e){ fail++; }
+    }
+    BADGE(ok===0 ? '状态：数据内联失败' : `状态：已就绪 · 已加载 ${ok} 个州 · 最小缩放=60%`);
+  })();
+})();
+</script>
+</body>
+</html>
