@@ -1,0 +1,65 @@
+name: Build single-file site (v6)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch libs & POA data
+        run: |
+          mkdir -p tmp
+          curl -L https://raw.githubusercontent.com/Leaflet/Leaflet/v1.9.4/dist/leaflet.css -o tmp/leaflet.css
+          curl -L https://raw.githubusercontent.com/Leaflet/Leaflet/v1.9.4/dist/leaflet.js  -o tmp/leaflet.js
+          curl -L https://raw.githubusercontent.com/nodeca/pako/v2.1.0/dist/pako.min.js -o tmp/pako.min.js
+          curl -L https://raw.githubusercontent.com/Offbeatmammal/AU_Postcode_Map/main/POA_2021_AUST_GDA2020_15percent.json -o tmp/poa.json
+
+      - name: Build inline index.html
+        run: |
+          node - <<'NODE'
+          const fs=require('fs'); const zlib=require('zlib');
+          const tpl = fs.readFileSync('index.tpl.html','utf8');
+          const leafletCSS = fs.readFileSync('tmp/leaflet.css','utf8');
+          const leafletJS  = fs.readFileSync('tmp/leaflet.js','utf8');
+          const pakoJS     = fs.readFileSync('tmp/pako.min.js','utf8');
+          const poa = JSON.parse(fs.readFileSync('tmp/poa.json','utf8'));
+          const groups={NSW:[],VIC:[],QLD:[],SA:[],WA:[],TAS:[],NT:[]};
+          for(const f of poa.features){
+            const p=f.properties||{};
+            const c=(p.POA_CODE21||p.poa_code_2021||p.postcode||p.code||'').toString().padStart(4,'0');
+            let st='NT'; switch(c[0]){ case '2':st='NSW'; break; case '3':st='VIC'; break; case '4':st='QLD'; break; case '5':st='SA'; break; case '6':st='WA'; break; case '7':st='TAS'; break; case '0': case '8': case '9': st='NT'; }
+            groups[st].push(f);
+          }
+          function b64gz(obj){return zlib.gzipSync(Buffer.from(JSON.stringify(obj),'utf8')).toString('base64');}
+          const repls = {
+            '__LEAFLET_CSS__': leafletCSS,
+            '__LEAFLET_JS__':  leafletJS,
+            '__PAKO_JS__':     pakoJS,
+            '__POA_NSW__': b64gz({type:'FeatureCollection',features:groups.NSW}),
+            '__POA_VIC__': b64gz({type:'FeatureCollection',features:groups.VIC}),
+            '__POA_QLD__': b64gz({type:'FeatureCollection',features:groups.QLD}),
+            '__POA_SA__' : b64gz({type:'FeatureCollection',features:groups.SA}),
+            '__POA_WA__' : b64gz({type:'FeatureCollection',features:groups.WA}),
+            '__POA_TAS__': b64gz({type:'FeatureCollection',features:groups.TAS}),
+            '__POA_NT__' : b64gz({type:'FeatureCollection',features:groups.NT}),
+          };
+          let out = tpl;
+          for(const [k,v] of Object.entries(repls)){
+            out = out.replace(new RegExp(k,'g'), ()=>v);
+          }
+          fs.writeFileSync('index.html', out);
+          console.log('Built index.html with inline libs and', Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,v.length])));
+          NODE
+
+      - name: Commit built file
+        run: |
+          echo > .nojekyll
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add index.html .nojekyll
+          git commit -m "Build single-file site (v6)" || echo "Nothing to commit"
+          git push
